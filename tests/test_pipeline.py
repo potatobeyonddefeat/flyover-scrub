@@ -67,6 +67,13 @@ def test_video_keeps_its_picture_and_loses_its_gps_tag(tmp_path):
     info = subprocess.run([find_ffmpeg(), "-hide_banner", "-i", str(res.output)], capture_output=True, text=True).stderr
     assert " Video: " in info and " Audio: " in info and "42.36" not in info
 
+    # A failed encode must not destroy a file already at the destination.
+    keep = tmp_path / "keep.xyz"
+    keep.write_text("precious")
+    with pytest.raises(ScrubError):
+        scrub_file(mov, keep)
+    assert keep.read_text() == "precious" and not list(tmp_path.glob("*.partial*"))
+
     notmedia = tmp_path / "notes.mp4"
     notmedia.write_text("not a recording")
     with pytest.raises(ScrubError):

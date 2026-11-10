@@ -172,19 +172,22 @@ def scrub_file(
 
         wav = tmp / "scrubbed.wav"
         sf.write(wav, y, sr, subtype="FLOAT")
+        # Encode beside the destination and move into place only on success, so a failed
+        # encode leaves neither a broken half-file nor a damaged file that was already there.
+        part = out.with_name(f"{out.stem}.partial{ext}")
         meta = [] if keep_metadata else ["-map_metadata", "-1", "-map_chapters", "-1"]
         if video:
             acodec = ["-c:a", "libopus", "-b:a", "160k"] if ext == ".webm" else ["-c:a", "aac", "-b:a", "256k"]
             cmd = [_ffmpeg(), "-v", "error", "-y", "-i", str(input), "-i", str(wav),
-                   "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", *acodec, *meta, "-shortest", str(out)]
+                   "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", *acodec, *meta, "-shortest", str(part)]
         else:
             rate = ["-b:a", "256k"] if ext in {".mp3", ".m4a", ".aac"} else []
-            cmd = [_ffmpeg(), "-v", "error", "-y", "-i", str(wav), *rate, *meta, str(out)]
+            cmd = [_ffmpeg(), "-v", "error", "-y", "-i", str(wav), *rate, *meta, str(part)]
         try:
             _run(cmd)
-        except ScrubError:
-            out.unlink(missing_ok=True)  # don't leave a broken half-file that looks scrubbed
-            raise
+            part.replace(out)
+        finally:
+            part.unlink(missing_ok=True)
         res.output = out
         res.metadata_stripped = not keep_metadata
         return res
