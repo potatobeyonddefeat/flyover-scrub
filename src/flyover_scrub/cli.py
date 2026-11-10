@@ -11,47 +11,26 @@ stripped from video outputs by default, since GPS tags are a far easier leak.
 from __future__ import annotations
 
 import argparse
-import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
-from .enf import detect_enf
-from .scrub import ScrubConfig, scrub
-
-NATIVE = {".wav", ".flac", ".aiff", ".aif", ".ogg"}
-
-
-def _ffmpeg() -> str:
-    exe = shutil.which("ffmpeg")
-    if not exe:
-        sys.exit("ffmpeg is required for this file type (brew install ffmpeg / apt install ffmpeg)")
-    return exe
+from .pipeline import NATIVE, FileResult, ScrubError, _ffmpeg, _run, scrub_file
+from .scrub import ScrubConfig
 
 
 def _read(path: Path, tmp: Path) -> tuple[np.ndarray, int]:
+    """Decode any file's first audio track. Used by the audit and the research scripts."""
     if path.suffix.lower() in NATIVE:
         return sf.read(path, always_2d=True)
     wav = tmp / "in.wav"
-    subprocess.run(
-        [_ffmpeg(), "-v", "error", "-y", "-i", str(path), "-map", "0:a:0", "-c:a", "pcm_f32le", str(wav)],
-        check=True,
-    )
+    try:
+        _run([_ffmpeg(), "-v", "error", "-y", "-i", str(path), "-map", "0:a:0", "-c:a", "pcm_f32le", str(wav)])
+    except ScrubError as e:
+        sys.exit(str(e))
     return sf.read(wav, always_2d=True)
-
-
-def _has_video(path: Path) -> bool:
-    if not shutil.which("ffprobe"):
-        return path.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
-        capture_output=True, text=True,
-    )
-    return bool(out.stdout.strip())
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -69,47 +48,27 @@ def main(argv: list[str] | None = None) -> None:
         ap.error("-o/--output is required unless --check")
     cfg = ScrubConfig(band=tuple(a.band), keep_stationary_tones=a.keep_hum, seed=a.seed)
 
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        x, sr = _read(a.input, tmp)
-        y, rep = scrub(x, sr, cfg)
+    def analysed(r: FileResult) -> None:
         print(
-            f"{a.input.name}: {x.shape[0] / sr:.1f}s @ {sr} Hz, {x.shape[1]} ch | "
-            f"tonal ridges: {rep.ridges_found} | in-band bins replaced: {rep.replaced_fraction:.0%}"
+            f"{a.input.name}: {r.duration_s:.1f}s @ {r.sample_rate} Hz, {r.channels} ch | "
+            f"tonal ridges: {r.ridges_found} | in-band bins replaced: {r.replaced_fraction:.0%}"
         )
-        enf_in = detect_enf(x.mean(axis=1), sr)
-        print(f"  {enf_in.describe()}")
-        if a.check:
-            if rep.ridges_found:
-                print("  long narrowband tones present (aircraft, drones, traffic, HVAC or hum).")
-            print("  note: faint lines below the noise floor are not detectable per-frame but are still")
-            print("  recoverable by a matched filter, so scrub anyway if location matters.")
-            return
+        print(f"  {r.enf_before.describe()}")
 
-        if enf_in.present:
-            enf_out = detect_enf(y.mean(axis=1), sr)
-            print(f"  after scrubbing: {enf_out.describe()}"
-                  + (" (--keep-hum keeps it)" if a.keep_hum and enf_out.present else ""))
-        peak = float(np.abs(y).max())
-        if peak > 1.0:
-            y = y / peak
-        out = a.output
-        if out.suffix.lower() in NATIVE:
-            sf.write(out, y, sr, subtype="FLOAT" if out.suffix.lower() == ".wav" else None)
-            print(f"wrote {out}")
-            return
-
-        wav = tmp / "scrubbed.wav"
-        sf.write(wav, y, sr, subtype="FLOAT")
-        meta = [] if a.keep_metadata else ["-map_metadata", "-1", "-map_chapters", "-1"]
-        if _has_video(a.input):
-            cmd = [_ffmpeg(), "-v", "error", "-y", "-i", str(a.input), "-i", str(wav),
-                   "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "256k",
-                   *meta, "-shortest", str(out)]
-        else:
-            cmd = [_ffmpeg(), "-v", "error", "-y", "-i", str(wav), *meta, str(out)]
-        subprocess.run(cmd, check=True)
-        print(f"wrote {out}" + ("" if a.keep_metadata else " (metadata stripped)"))
+    try:
+        r = scrub_file(a.input, a.output, cfg, keep_metadata=a.keep_metadata, check=a.check, analysed=analysed)
+    except ScrubError as e:
+        sys.exit(str(e))
+    if a.check:
+        if r.ridges_found:
+            print("  long narrowband tones present (aircraft, drones, traffic, HVAC or hum).")
+        print("  note: faint lines below the noise floor are not detectable per-frame but are still")
+        print("  recoverable by a matched filter, so scrub anyway if location matters.")
+        return
+    if r.enf_after is not None:
+        print(f"  after scrubbing: {r.enf_after.describe()}"
+              + (" (--keep-hum keeps it)" if a.keep_hum and r.enf_after.present else ""))
+    print(f"wrote {r.output}" + (" (metadata stripped)" if r.metadata_stripped else ""))
 
 
 if __name__ == "__main__":

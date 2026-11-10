@@ -13,6 +13,15 @@ dependencies = [
     "soundfile>=0.14.0",
 ]
 
+[project.optional-dependencies]
+gui = [
+    "PySide6-Essentials>=6.7",
+    "imageio-ffmpeg>=0.5",
+]
+
+[project.gui-scripts]
+flyover-scrub-gui = "flyover_scrub.gui:main"
+
 [build-system]
 requires = ["uv_build>=0.8.4,<0.9.0"]
 build-backend = "uv_build"

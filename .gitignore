@@ -6,3 +6,6 @@ __pycache__/
 *.mov
 *.MOV
 *.mp4
+build/
+dist/
+*.spec

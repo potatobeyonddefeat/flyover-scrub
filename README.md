@@ -24,6 +24,26 @@ The attack was shown by **colsto** in
 
 </details>
 
+## Desktop app (Windows and macOS)
+
+No terminal needed. Download the app for your computer from the
+[Releases page](../../releases), unzip it, and open **flyover-scrub**. Then drop
+an audio or video file onto the window.
+
+* The scrubbed copy is saved next to the original as `name-scrubbed.ext`. The original is never changed.
+* Metadata (GPS, dates) is stripped and steady hum is removed unless you tick the boxes to keep them.
+* Everything runs on your computer. Nothing is uploaded, and no Python or ffmpeg install is needed.
+* You can drop several files, or a folder, at once.
+
+The apps are not code-signed, so the first launch needs one extra step:
+**Windows**: "Windows protected your PC" → *More info* → *Run anyway*.
+**macOS**: right-click the app → *Open* (on macOS 15 and later: System Settings → Privacy & Security → *Open Anyway*).
+
+From source: `uv run --extra gui flyover-scrub-gui`. To build the app yourself:
+`uv sync --extra gui && uv pip install pyinstaller && uv run python packaging/build.py`.
+
+## Command line
+
 ```sh
 uv tool install .                         # or: uv run flyover-scrub ...
 flyover-scrub input.mov -o output.mov     # audio scrubbed, video copied, metadata stripped
