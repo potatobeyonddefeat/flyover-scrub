@@ -72,7 +72,7 @@ def test_video_keeps_its_picture_and_loses_its_gps_tag(tmp_path):
     keep.write_text("precious")
     with pytest.raises(ScrubError):
         scrub_file(mov, keep)
-    assert keep.read_text() == "precious" and not list(tmp_path.glob("*.partial*"))
+    assert keep.read_text() == "precious" and not list(tmp_path.glob(".flyover-scrub-*"))
 
     notmedia = tmp_path / "notes.mp4"
     notmedia.write_text("not a recording")

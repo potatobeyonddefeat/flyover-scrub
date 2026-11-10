@@ -172,9 +172,14 @@ def scrub_file(
 
         wav = tmp / "scrubbed.wav"
         sf.write(wav, y, sr, subtype="FLOAT")
-        # Encode beside the destination and move into place only on success, so a failed
-        # encode leaves neither a broken half-file nor a damaged file that was already there.
-        part = out.with_name(f"{out.stem}.partial{ext}")
+        # Encode into a fresh private folder beside the destination and move into place only
+        # on success: a failed encode leaves no broken half-file, and nothing that was already
+        # there (the destination, or any file with a similar name) can be overwritten or removed.
+        try:
+            partdir = Path(tempfile.mkdtemp(prefix=".flyover-scrub-", dir=out.parent))
+        except OSError as e:
+            raise ScrubError(f"cannot write to {out.parent}: {e.strerror or e}") from e
+        part = partdir / out.name
         meta = [] if keep_metadata else ["-map_metadata", "-1", "-map_chapters", "-1"]
         if video:
             acodec = ["-c:a", "libopus", "-b:a", "160k"] if ext == ".webm" else ["-c:a", "aac", "-b:a", "256k"]
@@ -187,7 +192,7 @@ def scrub_file(
             _run(cmd)
             part.replace(out)
         finally:
-            part.unlink(missing_ok=True)
+            shutil.rmtree(partdir, ignore_errors=True)
         res.output = out
         res.metadata_stripped = not keep_metadata
         return res
